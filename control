@@ -1,0 +1,9 @@
+Package: com.zlhkf.lumen
+Name: Lumen
+Description: Lumen is an iOS 16 system beautification suite. The first module restyles system alerts and action sheets with an iOS 27 style liquid-glass treatment. More visual refinements are planned.
+Maintainer: zlhkf
+Author: zlhkf
+Section: Tweaks
+Depends: mobilesubstrate (>= 0.9.5000), preferenceloader
+Architecture: iphoneos-arm64e
+Version: 1.2.46

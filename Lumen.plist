@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Filter</key>
+    <dict>
+        <key>Bundles</key>
+        <array>
+            <!--
+                 UIKit is the smallest static injection scope that can reach an
+                 arbitrary application, which is exactly what a *system* alert
+                 restyle needs: the tweak has to be resident in every process
+                 that may present a UIAlertController or a UIActionSheet. The
+                 runtime adds its own per-process gate, so nothing is drawn
+                 until the preference domain says the feature is on.
+            -->
+            <string>com.apple.UIKit</string>
+        </array>
+    </dict>
+</dict>
+</plist>

@@ -1,0 +1,9 @@
+.theos/
+packages/
+artifacts/
+*.deb
+.DS_Store
+_*.py
+_*.json
+_*.log
+build-output/

@@ -1,0 +1,123 @@
+name: Build Lumen
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+# Supersede an in-flight run instead of queueing behind it. Two stale runs
+# waiting for a macOS runner is what turns a slow build into a cancelled one.
+concurrency:
+  group: lumen-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.scheme }}
+    runs-on: macos-14
+    # The macOS runner queue has been observed at 30+ minutes. A 30-minute
+    # budget was measured to be spent entirely on queueing, with the first
+    # step ("Install Theos") never executing and the run reported as
+    # `cancelled` — indistinguishable from a real build failure.
+    timeout-minutes: 75
+    strategy:
+      # Never cancel a sibling flavour: the two schemes are independent
+      # deliverables, and losing one to save runner minutes loses a package.
+      fail-fast: false
+      matrix:
+        include:
+          - scheme: rootless
+            theos: https://raw.githubusercontent.com/theos/theos/master/bin/install-theos
+          - scheme: roothide
+            theos: https://raw.githubusercontent.com/roothide/theos/master/bin/install-theos
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Check macOS build tools
+        run: |
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          command -v dpkg-deb >/dev/null || brew install dpkg
+          command -v dpkg-deb
+
+      # ldid must exist, but it must be the bottle that is already there.
+      #
+      # `bin/install-theos` has no environment switch for this: on Homebrew it
+      # unconditionally runs `brew install ldid xz`, with no `command -v ldid`
+      # check and no "skip if present" branch. So a pre-installed but slightly
+      # outdated bottle gets *upgraded* by the installer, which drags in a
+      # source build of openssl@3 (minutes) plus autotools downloads that fail
+      # with `CurlDownloadStrategy::Timeout` — a 30-minute job that dies in a
+      # step named "Install Theos" and looks like a build failure.
+      #
+      # Pinning the formula version makes that `brew install` a no-op. `|| true`
+      # everywhere below, because a genuinely missing ldid must not take the run
+      # down before the installer retries.
+      - name: Install Theos
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          THEOS: ${{ github.workspace }}/theos
+          INSTALL_THEOS: ${{ matrix.theos }}
+        run: |
+          # openssl@1.1 ships on macos-14 and owns bin/openssl, which makes the
+          # openssl@3 link step fail. Remove the stale symlink first.
+          rm -f "$(brew --prefix)/bin/openssl" || true
+          brew link --overwrite openssl@3 || true
+          brew pin openssl@3 || true
+          brew install ldid || true
+          # Pin *after* installing too: the formula has to exist before it can
+          # be pinned, and pinning is what stops the installer from pulling a
+          # newer bottle.
+          brew pin ldid || true
+          brew list --versions ldid || true
+          command -v ldid
+          bash -c "$(curl -fsSL "$INSTALL_THEOS")"
+          command -v ldid
+
+      # A stale .theos would silently rebuild nothing and ship the previous
+      # run's dylib, which is indistinguishable from a correct build by size.
+      # An unknown THEOS_PACKAGE_SCHEME fails loudly in the module loader
+      # ("'X' package scheme does not exist"), so no extra guard is needed here.
+      - name: Build package
+        env:
+          THEOS: ${{ github.workspace }}/theos
+          SCHEME: ${{ matrix.scheme }}
+        run: |
+          rm -rf .theos packages
+          chmod 755 layout/DEBIAN/postinst
+          make clean package FINALPACKAGE=1 messages=yes THEOS_PACKAGE_SCHEME="$SCHEME"
+
+      - name: Verify package
+        id: verify
+        env:
+          SCHEME: ${{ matrix.scheme }}
+        run: |
+          package="$(find packages -maxdepth 1 -type f -name '*.deb' -print -quit)"
+          if [ -z "$package" ]; then
+            echo "no .deb was produced" >&2
+            exit 1
+          fi
+          chmod +x scripts/verify-package.sh
+          scripts/verify-package.sh "$package" "$SCHEME"
+          mkdir -p artifacts
+          cp "$package" "artifacts/$(basename "$package")"
+          # Read the version back out of the package that was just built, so the
+          # artifact name can never disagree with the payload.
+          version="$(dpkg-deb -f "$package" Version)"
+          echo "built ${SCHEME} ${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          # Taken from the built package, never a literal. A hardcoded version here
+          # silently labels every future upload with whatever version this line was
+          # last edited at — which is exactly how a 1.1.0 artifact name ended up
+          # on a 1.1.1 build, and how the wrong file gets installed.
+          name: lumen-${{ steps.verify.outputs.version }}-${{ matrix.scheme }}-${{ github.run_number }}
+          path: artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 7

@@ -1,0 +1,13 @@
+#!/bin/sh
+
+# Lumen only restyles alerts inside processes that already link UIKit, so there
+# is no application to relaunch and no system app to register at install time.
+# That also means no uicache call is required on either jailbreak flavour.
+#
+# This script must stay free of absolute jailbreak paths: under roothide the
+# maintainer-script root is jbroot rather than /, so a hard-coded /var/jb would
+# resolve to the wrong place.
+#
+# Respring (or restart Settings) so newly launched processes pick up the dylib.
+
+exit 0
